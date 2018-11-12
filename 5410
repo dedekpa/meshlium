@@ -1,0 +1,285 @@
+/*
+    Prvni verze firmware pro Plug&Sense Libelium Meshlium.
+    Projekt KIT CZU
+    Version:           1.0
+    Design:            Pavel Dedek
+    Implementation:    Pavel Dedek
+*/
+
+
+#include <WaspSensorAgr_v30.h>
+#include <BME280.h>
+#include <WaspFrame.h>
+#include <WaspXBee868LP.h>
+
+char node_ID[] = "5410"; // prvni
+//char node_ID[] = "547E"; // druhy
+
+//Instace sensor object
+leafWetnessClass lwSensor;
+radiationClass radSensor;
+watermarkClass wmSensor1(SOCKET_1);
+watermarkClass wmSensor2(SOCKET_2);
+watermarkClass wmSensor3(SOCKET_3);
+weatherStationClass weather;
+ds18b20Class ds18b20; //Soil temperature sensor (DS18B20)
+weatherStationClass vaneSensor;
+
+
+//variables to store sensors readings
+float temperature;
+float humidity;
+float pressure;
+uint8_t wetness;
+float UVvalue;
+float rad;
+float radiation,value;
+float dendrometer;
+float pt1000Temperature;
+float watermark1;
+float watermark2;
+float watermark3;
+float anemometer;
+float pluviometer1;
+float pluviometer2;
+float pluviometer3;
+uint8_t vane;
+float batlvl;
+float soil_tc_s;
+uint8_t smer;
+int abc;
+
+
+uint8_t error;
+char RX_ADDRESS[] = "0013A200415C61BB"; //MAC adresa Meshlium gateway
+
+
+// variable to store the number of pending pulses
+int pendingPulses;
+
+void setup() 
+{
+  USB.ON();
+  USB.println(F("Start program"));
+  
+  // Turn on the sensor board
+  Agriculture.ON();
+  xbee868LP.ON();
+  
+  // Set the Waspmote ID
+  frame.setID(node_ID); 
+}
+
+void measureSensors()
+{  
+
+xbee868LP.ON();
+  ///////////////////////////////////////////
+  // 3. Read sensors
+  ///////////////////////////////////////////  
+  
+  //It takes several minutes to read all sensors
+USB.println(F("ctu hodnoty zarizeni"));
+
+  // Read the temperature sensor 
+  temperature = Agriculture.getTemperature();
+  // Read the humidity sensor
+  humidity = Agriculture.getHumidity();
+  // Read the pressure sensor
+  pressure = Agriculture.getPressure();
+  // Read the leaf wetness sensor 
+  wetness = lwSensor.getLeafWetness();
+  // Read the ultraviolet sensor 
+  //UVvalue = radSensor.readRadiation();
+  // Conversion from voltage into umol·m-2·s-1
+  //radiation = UVvalue / 0.0002;
+  
+  //Battery level
+  batlvl = PWR.getBatteryLevel(); 
+  //read tge DS18B20
+  soil_tc_s = ds18b20.readDS18b20();
+  // Read the watermark 1 sensor 
+  watermark1 = wmSensor1.readWatermark();
+  // Read the watermark 2 sensor 
+  watermark2 = wmSensor2.readWatermark();
+  // Read the watermark 3 sensor 
+  watermark3 = wmSensor3.readWatermark();  
+  // Read the anemometer sensor 
+  anemometer = weather.readAnemometer();
+  // Read the pluviometer sensor 
+  pluviometer1 = weather.readPluviometerCurrent();
+  pluviometer2 = weather.readPluviometerHour();
+  pluviometer3 = weather.readPluviometerDay();
+ 
+
+
+  ///////////////////////////////////////////
+  // 4. Create ASCII frame
+  /////////////////////////////////////////// 
+USB.println(F("\n vztvarim /frame/ pro odeslani"));
+  // Create new frame (ASCII)
+  frame.createFrame(ASCII);
+  frame.addSensor(SENSOR_STR, "15min interval mezi merenim hodnot");
+  // Add battery level
+  frame.addSensor(SENSOR_BAT, batlvl);
+  // Add temperature
+  frame.addSensor(SENSOR_AGR_TC, temperature);
+  // Add humidity
+  frame.addSensor(SENSOR_AGR_HUM, humidity);
+  // Add pressure
+  frame.addSensor(SENSOR_AGR_PRES, pressure);
+  // Add wetness
+  frame.addSensor(SENSOR_AGR_LW, wetness);
+  // Add radiation
+  //frame.addSensor(SENSOR_AGR_PAR, radiation); 
+  // Soil temperature
+  frame.addSensor( SENSOR_AGR_SOILTC, soil_tc_s ); // pouze pro DS18B20 vylucuje se s PT1000
+  // Add watermark 1
+  frame.addSensor(SENSOR_AGR_SOIL1, watermark1);
+  // Add watermark 2
+  frame.addSensor(SENSOR_AGR_SOIL2, watermark2);
+  // Add watermark 3
+  frame.addSensor(SENSOR_AGR_SOIL3, watermark3);  
+  // Add pluviometer value
+  frame.addSensor( SENSOR_AGR_PLV1, pluviometer1 );
+  // Add pluviometer value
+  frame.addSensor( SENSOR_AGR_PLV2, pluviometer2 );
+  // Add pluviometer value
+  frame.addSensor( SENSOR_AGR_PLV3, pluviometer3 );
+  // Add anemometer value
+  frame.addSensor( SENSOR_AGR_ANE, anemometer );
+
+  char vane_str[10] = {0};
+  switch(weather.readVaneDirection())//vaneSensor.vaneDirection nebo weather.readVaneDirection
+  {
+  case  SENS_AGR_VANE_N   :  frame.addSensor( SENS_AGR_VANE_N, "N" );
+                             break;
+  case  SENS_AGR_VANE_NNE :  frame.addSensor( SENS_AGR_VANE_N,  "NNE" );
+                             break;  
+  case  SENS_AGR_VANE_NE  :  frame.addSensor( SENS_AGR_VANE_N,  "NE" );
+                             break;    
+  case  SENS_AGR_VANE_ENE :  frame.addSensor( SENS_AGR_VANE_N,  "ENE" );
+                             break;      
+  case  SENS_AGR_VANE_E   :  frame.addSensor( SENS_AGR_VANE_N,  "E" );
+                             break;    
+  case  SENS_AGR_VANE_ESE :  frame.addSensor( SENS_AGR_VANE_N,  "ESE" );
+                             break;  
+  case  SENS_AGR_VANE_SE  :  frame.addSensor( SENS_AGR_VANE_N,  "SE" );
+                             break;    
+  case  SENS_AGR_VANE_SSE :  frame.addSensor( SENS_AGR_VANE_N, "SSE" );
+                             break;   
+  case  SENS_AGR_VANE_S   :  frame.addSensor( SENS_AGR_VANE_N,  "S" );
+                             break; 
+  case  SENS_AGR_VANE_SSW :  frame.addSensor( SENS_AGR_VANE_N,  "SSW" );
+                             break; 
+  case  SENS_AGR_VANE_SW  :  frame.addSensor( SENS_AGR_VANE_N,  "SW" );
+                             break;  
+  case  SENS_AGR_VANE_WSW :  frame.addSensor( SENS_AGR_VANE_N,  "WSW" );
+                             break; 
+  case  SENS_AGR_VANE_W   :  frame.addSensor( SENS_AGR_VANE_N,  "W" );
+                             break;   
+  case  SENS_AGR_VANE_WNW :  frame.addSensor( SENS_AGR_VANE_N,  "WNW" );
+                             break; 
+  case  SENS_AGR_VANE_NW  :  frame.addSensor( SENS_AGR_VANE_N,  "WN" );
+                             break;
+  case  SENS_AGR_VANE_NNW :  frame.addSensor( SENS_AGR_VANE_N,  "NNW" );
+                             break;  
+  default                 :  
+                             break;    
+  }
+ 
+
+  // Show the frame
+  frame.showFrame();
+
+error = xbee868LP.send( RX_ADDRESS, frame.buffer, frame.length );
+  USB.println(F("\n Posilam data do RX node: "));
+
+//   check TX flag
+  if ( error == 0 )
+  {
+    USB.println(F("send ok"));
+  }
+  else
+  {
+    USB.println(F("send error"));
+} 
+}
+void loop()
+{
+  USB.ON();
+  Agriculture.ON();
+  xbee868LP.ON();
+  /////////////////////////////////////////////
+  // 1. Enter sleep mode
+  ///////////////////////////////////////////// RTC_ABSOLUTE mozna ted offset
+  
+  USB.println(F("uleham do hlubokeho spanku na 15 minut, pouze prseni interuption"));
+  Agriculture.sleepAgr("00:00:14:00", RTC_OFFSET , RTC_ALM1_MODE4, SENSOR_ON, SENS_AGR_PLUVIOMETER);
+
+  /////////////////////////////////////////////
+  // 2. Check interruptions
+  /////////////////////////////////////////////
+  //Check pluviometer interruption
+  if( intFlag & PLV_INT)
+  {
+    USB.println(F("+++ PLV interruption +++"));
+
+    pendingPulses = intArray[PLV_POS];
+
+    USB.print(F("Number of pending pulses:"));
+    USB.println( pendingPulses );
+
+    for(int i=0 ; i<pendingPulses; i++)
+    {
+      // Enter pulse information inside class structure
+      weather.storePulse();
+
+      // decrease number of pulses
+      intArray[PLV_POS]--;
+    }
+
+    // Clear flag
+    intFlag &= ~(PLV_INT); 
+  }
+  
+  //Check RTC interruption
+  if(intFlag & RTC_INT)
+  {
+    USB.println(F("+++ RTC interruption +++"));
+    
+    // switch on sensor board
+    Agriculture.ON();
+    RTC.ON();
+    USB.print(F("Time:"));
+    USB.println(RTC.getTime());        
+ USB.println(F("----------------------------------------------------"));
+
+    // Print the accumulated rainfall
+    USB.print(F("Current hour accumulated rainfall (mm/h): "));
+    USB.println( weather.readPluviometerCurrent() );
+
+    // Print the accumulated rainfall
+    USB.print(F("Previous hour accumulated rainfall (mm/h): "));
+    USB.println( weather.readPluviometerHour() );
+
+    // Print the accumulated rainfall
+    USB.print(F("Last 24h accumulated rainfall (mm/day): "));
+    USB.println( weather.readPluviometerDay() );
+
+    USB.println(F("----------------------------------------------------\n"));
+    // measure sensors
+    measureSensors();
+
+ 
+
+    // Clear flag
+    intFlag &= ~(RTC_INT); 
+  }  
+
+  USB.println(F("_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-"));
+  USB.println(F("Konec hlaseni"));
+  USB.println(F("_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-_.-\n"));
+  //PWR.deepSleep("00:00:14:00",RTC_OFFSET,RTC_ALM1_MODE1,ALL_OFF);
+}
+
