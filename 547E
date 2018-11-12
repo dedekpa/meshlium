@@ -1,0 +1,201 @@
+/*
+    Prvni verze firmware pro Plug&Sense Libelium Meshlium.
+    Projekt KIT CZU
+    Version:           1.0
+    Design:            Pavel Dedek
+    Implementation:    Pavel Dedek
+*/
+
+
+#include <WaspSensorAgr_v30.h>
+#include <BME280.h>
+#include <WaspFrame.h>
+#include <WaspXBee868LP.h>
+
+//char node_ID[] = "5410"; // prvni
+char node_ID[] = "547E"; // druhy
+
+//Instace sensor object
+leafWetnessClass lwSensor;
+
+pt1000Class pt1000Sensor;
+watermarkClass wmSensor1(SOCKET_1);
+watermarkClass wmSensor2(SOCKET_2);
+watermarkClass wmSensor3(SOCKET_3);
+radiationClass radSensor;
+
+
+//variables to store sensors readings
+float temperature;
+float humidity;
+float pressure;
+uint8_t wetness;
+float UVvalue;
+float radiation;
+
+float pt1000Temperature;
+float watermark1;
+float watermark2;
+float watermark3;
+float anemometer;
+float pluviometer1;
+float pluviometer2;
+float pluviometer3;
+
+float batlvl;
+float soil_tc_s;
+
+
+uint8_t error;
+char RX_ADDRESS[] = "0013A200415C61BB"; //MAC adresa Meshlium gateway
+
+// variable to store the number of pending pulses
+int pendingPulses;
+
+void setup() 
+{
+  USB.ON();
+  USB.println(F("Start program"));
+  
+  // Turn on the sensor board
+  Agriculture.ON();
+  xbee868LP.ON();
+  
+  // Set the Waspmote ID
+  frame.setID(node_ID); 
+}
+
+void measureSensors()
+{  
+
+xbee868LP.ON();
+  ///////////////////////////////////////////
+  // 3. Read sensors
+  ///////////////////////////////////////////  
+  
+  //It takes several minutes to read all sensors
+USB.println(F("ctu hodnoty zarizeni"));
+
+  // Read the temperature sensor 
+  temperature = Agriculture.getTemperature();
+  // Read the humidity sensor
+  humidity = Agriculture.getHumidity();
+  // Read the pressure sensor
+  pressure = Agriculture.getPressure();
+  // Read the leaf wetness sensor 
+  wetness = lwSensor.getLeafWetness();
+  // Read the ultraviolet sensor 
+  UVvalue = radSensor.readRadiation();
+  // Conversion from voltage into umol·m-2·s-1
+  radiation = UVvalue / 0.0002;
+ 
+  // Read the PT1000 sensor 
+  pt1000Temperature = pt1000Sensor.readPT1000(); 
+ 
+ 
+  
+  // Read the watermark 1 sensor 
+  watermark1 = wmSensor1.readWatermark();
+  // Read the watermark 2 sensor 
+  watermark2 = wmSensor2.readWatermark();
+  // Read the watermark 3 sensor 
+  watermark3 = wmSensor3.readWatermark();  
+  // Read the anemometer sensor 
+  
+  
+
+  batlvl = PWR.getBatteryLevel();
+ 
+  
+
+  ///////////////////////////////////////////
+  // 4. Create ASCII frame
+  /////////////////////////////////////////// 
+USB.println(F("\n vztvarim /frame/ pro odeslani"));
+  // Create new frame (ASCII)
+  frame.createFrame(ASCII);
+  frame.addSensor(SENSOR_STR, "15min, interval hodnoty");
+  frame.addSensor(SENSOR_BAT, batlvl);
+  // Add temperature
+  frame.addSensor(SENSOR_AGR_TC, temperature);
+  // Add humidity
+  frame.addSensor(SENSOR_AGR_HUM, humidity);
+  // Add pressure
+  frame.addSensor(SENSOR_AGR_PRES, pressure);
+  // Add wetness
+  frame.addSensor(SENSOR_AGR_LW, wetness);
+  // Add radiation
+  frame.addSensor(SENSOR_AGR_PAR, radiation);
+ 
+  // Add PT1000
+   frame.addSensor(SENSOR_AGR_SOILTC, pt1000Temperature); // pouze pro PT1000 vylucuje se s DS18B20
+ 
+  // Add watermark 1
+  frame.addSensor(SENSOR_AGR_SOIL1, watermark1);
+  // Add watermark 1
+  frame.addSensor(SENSOR_AGR_SOIL2, watermark2);
+  
+  // Add watermark 1
+  frame.addSensor(SENSOR_AGR_SOIL3, watermark3);  
+
+  frame.showFrame();
+
+   
+error = xbee868LP.send( RX_ADDRESS, frame.buffer, frame.length );
+  USB.println(F("\n Posilam data do RX node: "));
+
+//   check TX flag
+  if ( error == 0 )
+  {
+    USB.println(F("send ok"));
+  }
+  else
+  {
+    USB.println(F("send error"));
+
+  // wait 10 seconds
+  delay(10000);
+} 
+}
+void loop()
+{
+  USB.ON();
+  Agriculture.ON();
+  xbee868LP.ON();
+  /////////////////////////////////////////////
+  // 1. Enter sleep mode
+  /////////////////////////////////////////////
+  Agriculture.sleepAgr("00:00:00:33", RTC_ABSOLUTE, RTC_ALM1_MODE5, SENSOR_ON );
+
+  /////////////////////////////////////////////
+  // 2. Check interruptions
+  /////////////////////////////////////////////
+  //Check pluviometer interruption
+ 
+  
+  //Check RTC interruption
+  if(intFlag & RTC_INT)
+  {
+    USB.println(F("+++ RTC interruption +++"));
+    
+    // switch on sensor board
+    Agriculture.ON();
+    USB.print(F("Time:"));
+    USB.println(RTC.getTime());        
+
+    // measure sensors
+measureSensors();
+
+ 
+
+    // Clear flag
+    intFlag &= ~(RTC_INT); 
+  }  
+  USB.println(F("Hodnoty radiace:"));
+  USB.println(UVvalue);USB.println(radiation);
+  
+  USB.println(F("uleham do hlubokeho spanku na 14 minut"));
+ 
+  PWR.deepSleep("00:00:14:00",RTC_OFFSET,RTC_ALM1_MODE1,ALL_OFF);
+}
+
